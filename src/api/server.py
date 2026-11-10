@@ -35,11 +35,14 @@ def execute_agent_query(request: QueryRequest):
             
         inputs = {"messages": [HumanMessage(content=request.prompt)]}
         
+        # REQUIRED BY LANGGRAPH CHECKPOINTER: Pass thread_id in config
+        config = {"configurable": {"thread_id": "default_supply_chain_session"}}
+        
         trace_steps = []
         final_response = "No response generated."
         
-        # Execute the graph once using stream to capture both trace and final state
-        for event in compiled_graph.stream(inputs, stream_mode="updates"):
+        # Execute the graph once using stream with required config
+        for event in compiled_graph.stream(inputs, config=config, stream_mode="updates"):
             for node_name, node_output in event.items():
                 if node_name == "supervisor":
                     trace_steps.append("👔 **Supervisor Node**: Evaluated intent and routed execution.")
@@ -56,14 +59,13 @@ def execute_agent_query(request: QueryRequest):
                 if "messages" in node_output and node_output["messages"]:
                     latest_msg = node_output["messages"][-1]
                     if isinstance(latest_msg, AIMessage) and latest_msg.content:
-                        # Ensure we don't capture raw JSON tool-call strings as final answers
                         content = latest_msg.content.strip()
                         if not content.startswith("{") and not content.startswith("["):
                             final_response = content
 
-        # Fallback: if final_response wasn't captured from stream updates, invoke once
+        # Fallback: invoke with config if final_response wasn't captured from stream updates
         if final_response == "No response generated.":
-            final_state = compiled_graph.invoke(inputs)
+            final_state = compiled_graph.invoke(inputs, config=config)
             if final_state["messages"]:
                 last_msg = final_state["messages"][-1]
                 if hasattr(last_msg, "content") and last_msg.content:
